@@ -1,8 +1,7 @@
 import logging
 from .logs.logging import setup_logging
-from .db.init_db import create_student_table
-
-
+from .services.FaceRecognitionService import FaceRecognitionService
+from PIL import Image
 
 
 def main():
@@ -10,7 +9,18 @@ def main():
     logger = logging.getLogger()
 
     logger.info("程序启动")
-    create_student_table()
+
+    service = FaceRecognitionService()
+    image1 = Image.open("./2.jpg")
+    image2 = Image.open("./3.jpg")
+    
+    faces1, boxes1 = service.detect_faces(image1)
+    faces2, boxes2 = service.detect_faces(image2)
+
+    is_match,similarity = service.compare_features(faces1, faces2)
+    logger.info(f"比对结果: 是否匹配: {is_match}, 相似度: {similarity:.4f}")
+
+
 
 
 

@@ -18,7 +18,7 @@ def create_student_table():
         face_data LONGBLOB,
         photo_url VARCHAR(255),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+    )     
     """
     
     try:
