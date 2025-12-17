@@ -1,5 +1,5 @@
 import logging
-from .logs.logging import setup_logging
+from .utils.logging import setup_logging
 from .services.FaceRecognitionService import FaceRecognitionService
 from PIL import Image
 
