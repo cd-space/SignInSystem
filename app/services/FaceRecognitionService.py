@@ -106,37 +106,44 @@ class FaceRecognitionService:
         
         return features, boxes
     
-    def compare_features(self, feature1, feature2, threshold=0.6):
+    def compare_features(self, faces1, faces2, threshold=0.9):
         """
-        比对两个人脸特征向量
+        比对两组人脸特征向量（使用第一个人脸）
         
         参数:
-            feature1: numpy array 或 torch.Tensor, 第一个人脸特征向量 (512,)
-            feature2: numpy array 或 torch.Tensor, 第二个人脸特征向量 (512,)
-            threshold: float, 距离阈值，默认 0.6
+            faces1: torch.Tensor, 第一张图片的人脸 tensor
+            faces2: torch.Tensor, 第二张图片的人脸 tensor
+            threshold: float, 距离阈值，默认 0.9
             
         返回:
             is_match: bool, 是否匹配
-            similarity: float, 距离分数 (越小越相似)
+            distance: float, 欧氏距离 (越小越相似)
         """
         try:
-            # 转为 numpy array
-            if isinstance(feature1, torch.Tensor):
-                x1 = feature1.detach().cpu().numpy()
-            else:
-                x1 = np.asarray(feature1)
+            # 检查是否检测到人脸
+            if faces1 is None or len(faces1) == 0:
+                logger.warning("第一张图片未检测到人脸")
+                return False, 0.0
             
-            if isinstance(feature2, torch.Tensor):
-                x2 = feature2.detach().cpu().numpy()
-            else:
-                x2 = np.asarray(feature2)
+            if faces2 is None or len(faces2) == 0:
+                logger.warning("第二张图片未检测到人脸")
+                return False, 0.0
             
-            # 展平成一维
-            x1 = x1.ravel()
-            x2 = x2.ravel()
+            # 取第一个人脸
+            face1 = faces1[0]
+            face2 = faces2[0]
+            
+            # 提取特征（添加 batch 维度）
+            with torch.no_grad():
+                img1_tensor = self.resnet(face1.unsqueeze(0))
+                img2_tensor = self.resnet(face2.unsqueeze(0))
+            
+            # 转换为 numpy
+            x1 = img1_tensor.detach().cpu().numpy()
+            x2 = img2_tensor.detach().cpu().numpy()
             
             # 计算欧氏距离
-            distance = float(np.linalg.norm(x1 - x2))
+            distance = float(np.linalg.norm(x1 - x2, axis=1)[0])
             
             is_match = distance <= threshold
             

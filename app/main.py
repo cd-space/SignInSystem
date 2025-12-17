@@ -11,8 +11,8 @@ def main():
     logger.info("程序启动")
 
     service = FaceRecognitionService()
-    image1 = Image.open("./2.jpg")
-    image2 = Image.open("./3.jpg")
+    image1 = Image.open("./6.jpg")
+    image2 = Image.open("./10.jpg")
     
     faces1, boxes1 = service.detect_faces(image1)
     faces2, boxes2 = service.detect_faces(image2)
