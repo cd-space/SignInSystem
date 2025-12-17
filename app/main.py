@@ -2,6 +2,8 @@ import logging
 from .utils.logging import setup_logging
 from .services.FaceRecognitionService import FaceRecognitionService
 from PIL import Image
+from .api.routes import app
+import uvicorn
 
 
 def main():
@@ -10,15 +12,17 @@ def main():
 
     logger.info("程序启动")
 
-    service = FaceRecognitionService()
-    image1 = Image.open("./6.jpg")
-    image2 = Image.open("./10.jpg")
-    
-    faces1, boxes1 = service.detect_faces(image1)
-    faces2, boxes2 = service.detect_faces(image2)
+    uvicorn.run(app, host='0.0.0.0', port=8000)
 
-    is_match,similarity = service.compare_features(faces1, faces2)
-    logger.info(f"比对结果: 是否匹配: {is_match}, 相似度: {similarity:.4f}")
+    # service = FaceRecognitionService()
+    # image1 = Image.open("./6.jpg")
+    # image2 = Image.open("./10.jpg")
+    
+    # faces1, boxes1 = service.detect_faces(image1)
+    # faces2, boxes2 = service.detect_faces(image2)
+
+    # is_match,similarity = service.compare_features(faces1, faces2)
+    # logger.info(f"比对结果: 是否匹配: {is_match}, 相似度: {similarity:.4f}")
 
 
 
