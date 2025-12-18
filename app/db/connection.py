@@ -10,8 +10,8 @@ def get_connection():
         connection = mysql.connector.connect(
             host='localhost',
             user='root',
-            password='Dhy20040501-',  # 密码
-            database='SignInSystem'   # 数据库名
+            password='860066',  # 密码
+            database='signinsystem'   # 数据库名
         )
         logger.info("数据库连接成功")
         return connection

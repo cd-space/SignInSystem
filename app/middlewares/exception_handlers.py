@@ -16,10 +16,9 @@ async def validation_exception_handler(
         content={
             "code": 422,
             "message": "参数验证失败",
-            "data": exc.errors()
-        }
-    )
-
+            "data": None
+    }
+)
 
 async def http_exception_handler(
     request: Request,
