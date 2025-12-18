@@ -2,8 +2,9 @@ import logging
 from .utils.logging import setup_logging
 from .services.FaceRecognitionService import FaceRecognitionService
 from PIL import Image
-from .api.routes import app
 import uvicorn
+from fastapi import FastAPI
+from .api import userInfo
 
 
 def main():
@@ -12,7 +13,10 @@ def main():
 
     logger.info("程序启动")
 
-    uvicorn.run(app, host='0.0.0.0', port=8000)
+    app=FastAPI()
+    app.include_router(userInfo.router)
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
     # service = FaceRecognitionService()
     # image1 = Image.open("./6.jpg")
