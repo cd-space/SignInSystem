@@ -3,8 +3,14 @@ from .utils.logging import setup_logging
 from .services.FaceRecognitionService import FaceRecognitionService
 from PIL import Image
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from .api import userInfo
+from .middlewares.exception_handlers import (
+    validation_exception_handler,
+    http_exception_handler,
+    global_exception_handler
+)
 
 
 def main():
@@ -13,7 +19,13 @@ def main():
 
     logger.info("程序启动")
 
-    app=FastAPI()
+    app = FastAPI()
+    
+    # 注册异常处理器
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(HTTPException, http_exception_handler)
+    app.add_exception_handler(Exception, global_exception_handler)
+    
     app.include_router(userInfo.router)
 
     uvicorn.run(app, host="0.0.0.0", port=8000)

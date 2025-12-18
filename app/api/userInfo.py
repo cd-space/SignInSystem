@@ -3,56 +3,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from app.db.connection import get_connection
 from typing import Optional
-from fastapi import Request
 from fastapi import APIRouter
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
 
 logger = logging.getLogger()
 router = APIRouter()
 
-
-# @app.exception_handler(RequestValidationError)
-# async def validation_exception_handler(
-#     request: Request,
-#     exc: RequestValidationError
-# ):
-#     return JSONResponse(
-#         status_code=200,
-#         content={
-#             "code": 40001,
-#             "message": "参数校验失败",
-#         }
-#     )
-
-# @app.exception_handler(HTTPException)
-# async def http_exception_handler(
-#     request: Request,
-#     exc: HTTPException
-# ):
-#     return JSONResponse(
-#         status_code=200,
-#         content={
-#             "code": exc.status_code,
-#             "message": exc.detail,
-#             "data": None
-#         }
-#     )
-
-# @app.exception_handler(Exception)
-# async def global_exception_handler(
-#     request: Request,
-#     exc: Exception
-# ):
-#     logger.error(f"未处理异常: {exc}")
-#     return JSONResponse(
-#         status_code=200,
-#         content={
-#             "code": 50001,
-#             "message": "服务器内部错误",
-#             "data": None
-#         }
-#     )
 
 class StudentCreate(BaseModel):
     name: str
