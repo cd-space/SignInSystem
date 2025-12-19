@@ -9,7 +9,7 @@ logger = logging.getLogger()
 router = APIRouter()
     
 @router.delete("/api/deleteusers", response_model=dict, status_code=200)
-def delete_user(user_id: int):
+def delete_user(user_id: str):
     """
     删除用户接口
     请求参数:
@@ -42,7 +42,7 @@ def delete_user(user_id: int):
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
     
 class UserSearchReq(BaseModel):
-    id: Optional[int] = None
+    id: Optional[str] = None
     phone: Optional[str] = None
     student_id: Optional[str] = None
 
@@ -107,7 +107,7 @@ def search_users(req: UserSearchReq):
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
 
 class UpdateUserReq(BaseModel):
-    id: int
+    id: str
     name: Optional[str] = None
     phone: Optional[str] = None
     student_id: Optional[str] = None
@@ -115,7 +115,7 @@ class UpdateUserReq(BaseModel):
     role: Optional[str] = None
     password: Optional[str] = None
 
-@router.patch("/api/updateusers", response_model=dict, status_code=200)
+@router.post("/api/updateusers", response_model=dict, status_code=200)
 def update_user(req: UpdateUserReq):
     """
     通过 id 锁定用户，上传哪些值就更新哪些值
