@@ -6,6 +6,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from .api import userInfo,signIn,classInfo
+from fastapi.middleware.cors import CORSMiddleware
 from .middlewares.exception_handlers import (
     validation_exception_handler,
     http_exception_handler,
@@ -20,6 +21,14 @@ def main():
     logger.info("程序启动")
 
     app = FastAPI()
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],              # 或 ["https://example.com"]
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     
     # 注册异常处理器
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
