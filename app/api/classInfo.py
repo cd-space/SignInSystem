@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional,List
 from app.db.connection import get_connection
 import logging
 import uuid
@@ -10,57 +10,157 @@ router = APIRouter()
 
 
 class ClassCreate(BaseModel):
-    name: Optional[str] = None
-    owner: Optional[str] = None
+    name: str
+    owner: str
+    studentlist: List[str]
 
 
 @router.post("/api/addclass", response_model=dict, status_code=200)
 def create_class(req: ClassCreate):
     """
-    新建班级
-    Body 示例:
+    新建班级并加入学生（使用 uuid4.hex 前 12 位作为 id）
+    请求示例:
     {
-        "name": "string",
-        "owner": "string"
+        "name": "汗建国",
+        "owner": "exercitation Excepteur fugiat ea",
+        "studentlist": ["5515sdad25s5", "sdcd51525c2v"]
     }
     返回:
     {
-        "code": 200,
-        "id": 0
+        "code": 0,
+        "id": "generated_id"
     }
     """
+    if not req.name or not req.owner:
+        raise HTTPException(status_code=400, detail="需要提供 name 和 owner")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        cursor = conn.cursor()
+
+        # 若已存在相同 name + owner 的班级，复用之（避免重复插入）
+        cursor.execute("SELECT id FROM class WHERE `name` = %s AND `owner` = %s LIMIT 1", (req.name, req.owner))
+        row = cursor.fetchone()
+        if row:
+            class_id = row[0]
+        else:
+            # 生成 12 位 id 并插入 class 表，冲突重试最多 5 次
+            class_id = None
+            for _ in range(5):
+                candidate = uuid.uuid4().hex[:12]
+                try:
+                    cursor.execute("INSERT INTO class (id, `name`, `owner`) VALUES (%s, %s, %s)", (candidate, req.name, req.owner))
+                    conn.commit()
+                    class_id = candidate
+                    break
+                except Exception as e:
+                    conn.rollback()
+                    msg = str(e).lower()
+                    if "duplicate" in msg or "unique" in msg or "1062" in msg:
+                        continue
+                    raise HTTPException(status_code=500, detail=f"插入班级失败: {e}")
+
+            if class_id is None:
+                raise HTTPException(status_code=500, detail="生成班级ID失败，请重试")
+
+        # 插入 student_class 映射表 (student_id, class_id)，先校验 student 存在并避免重复映射
+        if req.studentlist:
+            for student_id in req.studentlist:
+                # 验证 student_id 在 user_info 表中存在（student_id 对应 user_info.id）
+                cursor.execute("SELECT id FROM user_info WHERE id = %s LIMIT 1", (student_id,))
+                if not cursor.fetchone():
+                    logger.warning(f"学生不存在，跳过映射: {student_id}")
+                    continue
+
+                # 避免重复映射
+                cursor.execute("SELECT 1 FROM student_class WHERE student_id = %s AND class_id = %s LIMIT 1", (student_id, class_id))
+                if cursor.fetchone():
+                    continue
+
+                cursor.execute("INSERT INTO student_class (student_id, class_id) VALUES (%s, %s)", (student_id, class_id))
+
+            conn.commit()
+
+        logger.info(f"新增/复用班级成功: ID={class_id}, 数据={req.dict()}")
+        return {"code": 0, "id": class_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"新增班级失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+class OwnerQueryReq(BaseModel):
+    id: Optional[str] = None
+
+@router.post("/api/searchclass_by_user", response_model=dict, status_code=200)
+def get_classes_by_user(req: OwnerQueryReq):
+    """
+    根据 user_info.id 查询该用户（id 对应的 user），返回该用户名下的班级信息
+    请求 Body 示例: {"id": "string"}
+    返回:
+    {
+      "code": 200,
+      "data": {
+        "owner_id": "string",
+        "owner_name": "string",
+        "classes": [
+          {"id": "string", "name": "string"}
+        ]
+      }
+    }
+    """
+    if not req.id:
+        raise HTTPException(status_code=400, detail="需要提供 id")
+
     try:
         conn = get_connection()
         if not conn:
             raise HTTPException(status_code=500, detail="数据库连接失败")
 
         cursor = conn.cursor()
-        # 使用 uuid4 生成 8 位 hex 字符串作为 id，若冲突重试最多 5 次
-        class_id = None
-        for _ in range(5):
-            candidate = uuid.uuid4().hex[:12]
-            try:
-                sql = "INSERT INTO class (id, `name`, `owner`) VALUES (%s, %s, %s)"
-                cursor.execute(sql, (candidate, req.name, req.owner))
-                conn.commit()
-                class_id = candidate
-                break
-            except Exception as e:
-                conn.rollback()
-                msg = str(e).lower()
-                # 检查是否为唯一键冲突，若是则重试，否则抛出
-                if "duplicate" in msg or "unique" in msg or "1062" in msg:
-                    continue
-                cursor.close()
-                conn.close()
-                raise
+        # 先查 user_info 获取 owner 名称
+        cursor.execute("SELECT id, name FROM user_info WHERE id = %s LIMIT 1", (req.id,))
+        user_row = cursor.fetchone()
+        if not user_row:
+            cursor.close()
+            conn.close()
+            return {"code": 404, "status": None}
+
+        owner_id, owner_name = user_row
+
+        # 查询 class 表中 owner 与 user.id 或 owner 与 user.name 匹配的班级
+        sql = "SELECT id, `name` FROM class WHERE owner = %s OR owner = %s"
+        cursor.execute(sql, (owner_id, owner_name))
+        rows = cursor.fetchall()
+
+        classes = [{"id": r[0], "name": r[1]} for r in rows] if rows else []
 
         cursor.close()
         conn.close()
 
-        logger.info(f"新增班级成功: ID={class_id}, 数据={req.dict()}")
-        return {"code": 200, "id": class_id}
+        return {
+            "code": 200,
+            "data": {
+                "owner_id": owner_id,
+                "owner_name": owner_name,
+                "classes": classes
+            }
+        }
 
     except Exception as e:
-        logger.error(f"新增班级失败: {e}")
+        logger.error(f"查询用户班级失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")

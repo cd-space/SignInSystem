@@ -113,7 +113,6 @@ class UpdateUserReq(BaseModel):
     student_id: Optional[str] = None
     face_feature: Optional[str] = None
     role: Optional[str] = None
-    password: Optional[str] = None
 
 @router.post("/api/updateusers", response_model=dict, status_code=200)
 def update_user(req: UpdateUserReq):
@@ -124,7 +123,6 @@ def update_user(req: UpdateUserReq):
         "id": 1,
         "name": "new name",
         "phone": "123",
-        "password": "newpass"
     }
     返回:
     {
@@ -168,9 +166,6 @@ def update_user(req: UpdateUserReq):
         if req.role is not None:
             updates.append("role = %s")
             params.append(req.role)
-        if req.password is not None:
-            updates.append("password = %s")
-            params.append(req.password)
 
         # ③ 用户存在，但没有任何更新字段
         if not updates:
@@ -193,4 +188,72 @@ def update_user(req: UpdateUserReq):
 
     except Exception as e:
         logger.error(f"更新用户失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    
+
+class PasswordChangeReq(BaseModel):
+        id: str
+        old_password: str
+        new_password: str
+
+@router.post("/api/update_password", response_model=dict, status_code=200)
+def change_password(req: PasswordChangeReq):
+    """
+    通过 id 锁定用户，使用旧密码比对后更新为新密码
+    请求 Body:
+    {
+        "id": "string",
+        "old_password": "string",
+        "new_password": "string"
+    }
+    返回:
+    {
+        "code": 200,
+        "message": "密码修改成功"
+    }
+    不成功时返回 code 为 404(用户不存在) 或 401(原密码错误)
+    """
+
+    # 解析并验证请求体
+    try:
+        if isinstance(req, PasswordChangeReq):
+            data = req
+        else:
+            data = PasswordChangeReq(**(req.dict() if hasattr(req, "dict") else {}))
+    except Exception:
+        raise HTTPException(status_code=400, detail="请求参数错误，需包含 id、old_password、new_password")
+
+    if not data.id or not data.old_password or not data.new_password:
+        raise HTTPException(status_code=400, detail="需要提供 id、old_password 和 new_password")
+
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT password FROM user_info WHERE id = %s LIMIT 1", (data.id,))
+        row = cursor.fetchone()
+        if not row:
+            cursor.close()
+            conn.close()
+            return {"code": 404, "message": "用户不存在"}
+
+        current_password = row[0]
+        if current_password != data.old_password:
+            cursor.close()
+            conn.close()
+            return {"code": 401, "message": "原密码错误"}
+
+        cursor.execute("UPDATE user_info SET password = %s WHERE id = %s", (data.new_password, data.id))
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        logger.info(f"用户 {data.id} 修改密码成功")
+        return {"code": 200, "message": "密码修改成功"}
+
+    except Exception as e:
+        logger.error(f"修改密码失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
