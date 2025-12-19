@@ -1,0 +1,77 @@
+CREATE TABLE `user_info` (
+  `id` CHAR(36) NOT NULL COMMENT '用户ID',
+  `name` varchar(50) NOT NULL COMMENT '姓名',
+  `phone` varchar(20) DEFAULT NULL COMMENT '电话号码',
+  `student_id` varchar(30) DEFAULT NULL COMMENT '学号',
+  `password` varchar(255) NOT NULL COMMENT '密码',
+  `face_feature` blob COMMENT '人脸特征向量（二进制）',
+  `face_path` varchar(255) DEFAULT NULL COMMENT '人脸照片路径',
+  `role` enum('student','teacher','admin') NOT NULL DEFAULT 'student' COMMENT '身份角色',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `phone` (`phone`),
+  UNIQUE KEY `student_no` (`student_id`)
+) ENGINE=InnoDB
+DEFAULT CHARSET=utf8mb4
+COLLATE=utf8mb4_0900_ai_ci
+COMMENT='用户信息表';
+
+
+
+
+CREATE TABLE `class` (
+  `id` CHAR(36) NOT NULL COMMENT '班级ID',
+  `name` varchar(100) NOT NULL COMMENT '班级名称',
+  `owner` varchar(100) NOT NULL COMMENT '班级创建者/负责人',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+CREATE TABLE `sign_task` (
+  `id` CHAR(36) NOT NULL COMMENT '签到任务ID',
+  `class_id` CHAR(36) NOT NULL COMMENT '签到班级ID',
+  `initiator` varchar(50) NOT NULL COMMENT '签到发起人',
+  `status` tinyint NOT NULL DEFAULT '1' COMMENT '状态：1进行中 2已结束',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `sign_task_ibfk_1` (`class_id`),
+  CONSTRAINT `sign_task_ibfk_1`
+    FOREIGN KEY (`class_id`) REFERENCES `class` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='签到任务表';
+
+CREATE TABLE `sign_record` (
+  `id` CHAR(36) NOT NULL COMMENT '签到记录ID',
+  `sign_task_id` CHAR(36) NOT NULL COMMENT '签到任务ID',
+  `student_id` CHAR(36) NOT NULL COMMENT '学生ID',
+  `sign_time` datetime DEFAULT NULL COMMENT '实际签到时间',
+  `sign_status` tinyint NOT NULL DEFAULT '0' COMMENT '0未签到 1正常 2迟到 3缺勤',
+  `face_score` float DEFAULT NULL COMMENT '人脸相似度得分',
+  `sign_method` tinyint NOT NULL DEFAULT '1' COMMENT '1人脸签到 2手动补签',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_student` (`sign_task_id`,`student_id`),
+  KEY `sign_record_ibfk_2` (`student_id`),
+  CONSTRAINT `sign_record_ibfk_1`
+    FOREIGN KEY (`sign_task_id`) REFERENCES `sign_task` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `sign_record_ibfk_2`
+    FOREIGN KEY (`student_id`) REFERENCES `user_info` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='签到记录表';
+
+
+CREATE TABLE `student_class` (
+  `id` CHAR(36) NOT NULL COMMENT '主键',
+  `student_id` CHAR(36) NOT NULL COMMENT '学生ID',
+  `class_id` CHAR(36) NOT NULL COMMENT '班级ID',
+  `joined_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '加入班级时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_student_class` (`student_id`,`class_id`),
+  KEY `class_id` (`class_id`),
+  CONSTRAINT `student_class_ibfk_1`
+    FOREIGN KEY (`student_id`) REFERENCES `user_info` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `student_class_ibfk_2`
+    FOREIGN KEY (`class_id`) REFERENCES `class` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
