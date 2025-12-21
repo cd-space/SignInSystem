@@ -1,28 +1,30 @@
 FROM python:3.9.23
 
-# 1. 环境变量（防止 pyc、缓冲）
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# 基础环境变量
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-# 2. 工作目录
 WORKDIR /app
 
-# 3. 先拷贝依赖（利用缓存）
+# 先装系统依赖（如你用到了 mysqlclient / cryptography）
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# 先拷贝 requirements，最大化利用缓存
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir \
+RUN pip install \
     -i https://pypi.tuna.tsinghua.edu.cn/simple \
     -r requirements.txt
 
+# 再拷贝代码（这一步只在代码变更时触发）
+COPY app ./app
 
-# 4. 再拷贝项目代码
-COPY . .
-
-# 5. 暴露端口（只是说明）
 EXPOSE 8000
 
-# 6. 启动命令
-CMD ["python","-m","app.main"]
+CMD ["python", "-m", "app.main"]
 
 
 
