@@ -362,3 +362,106 @@ def update_sign_record(req: UpdateRecordReq):
                 conn.close()
         except Exception:
             pass
+
+class TeacherQueryReq(BaseModel):
+    initiator: str
+
+@router.post("/api/query_teacher_sign", response_model=dict, status_code=200)
+def query_teacher_sign(req: TeacherQueryReq):
+    """
+    老师查询进行中的签到：
+    请求 Body: { "initiator": "teacher_name" }
+    若存在 status=1 的 sign_task，返回第一个 sign_task_id；否则返回 message 表示没有进行中的签到
+    """
+    if not req.initiator:
+        raise HTTPException(status_code=400, detail="需要提供 initiator")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT sign_task_id FROM sign_task WHERE initiator = %s AND status = %s LIMIT 1",
+            (req.initiator, 1)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"code": 200, "message": "没有进行中的签到"}
+
+        return {"code": 200, "sign_task_id": row[0]}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询老师签到失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+class SignTaskStudentsReq(BaseModel):
+    sign_task_id: str
+
+@router.post("/api/query_sign_task_students", response_model=dict, status_code=200)
+def query_sign_task_students(req: SignTaskStudentsReq):
+    """
+    查询应签到学生名单：
+    请求 Body: { "sign_task_id": "task123" }
+    返回: {"code":200, "data":[{"user_id":"...", "name":"...", "sign_status":0}, ...]}
+    """
+    if not req.sign_task_id:
+        raise HTTPException(status_code=400, detail="需要提供 sign_task_id")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT sr.student_id, ui.name, sr.sign_status
+            FROM sign_record sr
+            LEFT JOIN user_info ui ON sr.student_id = ui.id
+            WHERE sr.sign_task_id = %s
+            """,
+            (req.sign_task_id,)
+        )
+        rows = cursor.fetchall()
+
+        data = []
+        if rows:
+            for r in rows:
+                data.append({
+                    "user_id": r[0],
+                    "name": r[1],
+                    "sign_status": r[2]
+                })
+
+        return {"code": 200, "data": data}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询签到学生名单失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
