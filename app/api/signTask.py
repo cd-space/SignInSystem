@@ -186,9 +186,10 @@ def query_student_sign(req: StudentSignReq):
         # 查询学生的签到记录，关联 sign_task 获取进行中的任务（status=1）
         cursor.execute(
             """
-            SELECT sr.sign_task_id, sr.sign_status, st.initiator, st.created_at, st.class_id
+            SELECT sr.sign_task_id, sr.sign_status, st.initiator, ui.name AS initiator_name, st.created_at, st.class_id
             FROM sign_record sr
             JOIN sign_task st ON sr.sign_task_id = st.sign_task_id
+            LEFT JOIN user_info ui ON st.initiator = ui.id
             WHERE sr.student_id = %s AND st.status = 1
             """,
             (req.student_id,)
@@ -203,9 +204,10 @@ def query_student_sign(req: StudentSignReq):
             results.append({
                 "sign_task_id": r[0],
                 "sign_status": r[1],
-                "initiator": r[2],
-                "created_at": r[3].strftime("%Y-%m-%d %H:%M:%S") if r[3] else None,
-                "class_id": r[4]
+                "initiator_id": r[2],
+                "initiator_name": r[3] if r[3] else None,
+                "created_at": r[4].strftime("%Y-%m-%d %H:%M:%S") if r[4] else None,
+                "class_id": r[5]
             })
 
         return {"code": 200, "data": results}
@@ -316,12 +318,28 @@ def update_sign_record(req: UpdateRecordReq):
 
         cursor = conn.cursor()
         
-        # 根据是否提供 face_score 决定更新字段
+        
+                # 1. 先判断记录是否存在
+        cursor.execute(
+            """
+            SELECT sign_status 
+            FROM sign_record
+            WHERE sign_task_id = %s AND student_id = %s
+            """,
+            (req.sign_task_id, req.student_id)
+        )
+        row = cursor.fetchone()
+        if not row:
+            return {"code": 404, "message": "签到记录不存在"}
+
+        old_status = row[0]
+
+        # 2. 再更新
         if req.face_score is not None:
             cursor.execute(
                 """
-                UPDATE sign_record 
-                SET sign_status = %s, face_score = %s 
+                UPDATE sign_record
+                SET sign_status = %s, face_score = %s
                 WHERE sign_task_id = %s AND student_id = %s
                 """,
                 (req.new_status, req.face_score, req.sign_task_id, req.student_id)
@@ -329,20 +347,20 @@ def update_sign_record(req: UpdateRecordReq):
         else:
             cursor.execute(
                 """
-                UPDATE sign_record 
-                SET sign_status = %s 
+                UPDATE sign_record
+                SET sign_status = %s
                 WHERE sign_task_id = %s AND student_id = %s
                 """,
                 (req.new_status, req.sign_task_id, req.student_id)
             )
-        
-        if cursor.rowcount == 0:
-            conn.rollback()
-            return {"code": 404, "message": "记录未找到"}
-        
+
         conn.commit()
-        logger.info(f"更新签到状态成功: sign_task_id={req.sign_task_id}, student_id={req.student_id}, status={req.new_status}")
-        return {"code": 200, "message": "更新成功"}
+
+        # 3. 根据是否变化返回不同信息
+        if old_status == req.new_status:
+            return {"code": 200, "message": "状态未变化"}
+        else:
+            return {"code": 200, "message": "更新成功"}
 
     except HTTPException:
         raise
@@ -416,8 +434,7 @@ class SignTaskStudentsReq(BaseModel):
 def query_sign_task_students(req: SignTaskStudentsReq):
     """
     查询应签到学生名单：
-    请求 Body: { "sign_task_id": "task123" }
-    返回: {"code":200, "data":[{"user_id":"...", "name":"...", "sign_status":0}, ...]}
+    返回顶层字段：code, created_time, update_time, class_name, task_status, data
     """
     if not req.sign_task_id:
         raise HTTPException(status_code=400, detail="需要提供 sign_task_id")
@@ -430,6 +447,31 @@ def query_sign_task_students(req: SignTaskStudentsReq):
             raise HTTPException(status_code=500, detail="数据库连接失败")
 
         cursor = conn.cursor()
+
+        # 先取该次签到的时间、状态与班级名称
+        cursor.execute(
+            """
+            SELECT
+                MIN(st.created_at) AS created_at,
+                MAX(st.updated_at) AS updated_at,
+                GROUP_CONCAT(DISTINCT c.name SEPARATOR ',') AS class_names,
+                MAX(st.status) AS task_status
+            FROM sign_task st
+            LEFT JOIN class c ON st.class_id = c.id
+            WHERE st.sign_task_id = %s
+            """,
+            (req.sign_task_id,)
+        )
+        meta = cursor.fetchone()
+        if not meta or meta[0] is None:
+            return {"code": 404, "message": "未找到该签到任务"}
+
+        created_time = meta[0].strftime("%Y-%m-%d %H:%M:%S") if meta[0] else None
+        update_time = meta[1].strftime("%Y-%m-%d %H:%M:%S") if meta[1] else None
+        class_name = meta[2].split(",") if meta[2] else []
+        task_status = int(meta[3]) if meta[3] is not None else None
+
+        # 再取学生名单
         cursor.execute(
             """
             SELECT sr.student_id, ui.name, sr.sign_status
@@ -450,12 +492,178 @@ def query_sign_task_students(req: SignTaskStudentsReq):
                     "sign_status": r[2]
                 })
 
-        return {"code": 200, "data": data}
+        return {
+            "code": 200,
+            "created_time": created_time,
+            "update_time": update_time,
+            "class_name": class_name,
+            "task_status": task_status,
+            "data": data
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"查询签到学生名单失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+class TeacherHistoryReq(BaseModel):
+    initiator: str
+
+@router.post("/api/query_teacher_history", response_model=dict, status_code=200)
+def query_teacher_history(req: TeacherHistoryReq):
+    """
+    老师查询历史（包括进行中）签到：
+    请求 Body: { "initiator": "teacher_name_or_id" }
+    同一个 sign_task_id 的多个班级合并为一条返回，class_name 为列表
+    人数统计仅从 sign_record 聚合（避免重复计数）
+    """
+    if not req.initiator:
+        raise HTTPException(status_code=400, detail="需要提供 initiator")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                st.sign_task_id,
+                st.status,
+                st.created_at,
+                st.updated_at,
+                GROUP_CONCAT(DISTINCT c.name SEPARATOR ',') AS class_names,
+                COALESCE(sr.total_num, 0) AS total_num,
+                COALESCE(sr.num_0, 0) AS num_0,
+                COALESCE(sr.num_1, 0) AS num_1,
+                COALESCE(sr.num_2, 0) AS num_2,
+                COALESCE(sr.num_3, 0) AS num_3
+            FROM sign_task st
+            LEFT JOIN class c ON st.class_id = c.id
+            LEFT JOIN (
+                SELECT sign_task_id,
+                       COUNT(*) AS total_num,
+                       SUM(CASE WHEN sign_status = 0 THEN 1 ELSE 0 END) AS num_0,
+                       SUM(CASE WHEN sign_status = 1 THEN 1 ELSE 0 END) AS num_1,
+                       SUM(CASE WHEN sign_status = 2 THEN 1 ELSE 0 END) AS num_2,
+                       SUM(CASE WHEN sign_status = 3 THEN 1 ELSE 0 END) AS num_3
+                FROM sign_record
+                GROUP BY sign_task_id
+            ) sr ON sr.sign_task_id = st.sign_task_id
+            WHERE st.initiator = %s
+            GROUP BY st.sign_task_id, st.status, st.created_at, st.updated_at, sr.total_num, sr.num_0, sr.num_1, sr.num_2, sr.num_3
+            ORDER BY st.created_at DESC
+            """,
+            (req.initiator,)
+        )
+        rows = cursor.fetchall()
+
+        data = []
+        if rows:
+            for r in rows:
+                created_at = r[2].strftime("%Y-%m-%d %H:%M:%S") if r[2] else None
+                updated_at = r[3].strftime("%Y-%m-%d %H:%M:%S") if r[3] else None
+                class_names = r[4].split(',') if r[4] else []
+                data.append({
+                    "sign_task_id": r[0],
+                    "status": r[1],
+                    "created_time": created_at,
+                    "update_time": updated_at,
+                    "class_name": class_names,
+                    "total_num": int(r[5]) if r[5] is not None else 0,
+                    "0num": int(r[6]) if r[6] is not None else 0,
+                    "1num": int(r[7]) if r[7] is not None else 0,
+                    "2num": int(r[8]) if r[8] is not None else 0,
+                    "3num": int(r[9]) if r[9] is not None else 0,
+                })
+
+        return {"code": 200, "data": data}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询老师签到历史失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+class StudentHistoryReq(BaseModel):
+    student_id: str
+
+@router.post("/api/query_student_history", response_model=dict, status_code=200)
+def query_student_history(req: StudentHistoryReq):
+    """
+    学生查询历史签到（包括进行中和结束的）：
+    请求 Body: { "student_id": "用户ID" }
+    说明：按 sign_record 中的记录数返回多条数据；通过 student_class 确认 student_id 与 class_id 对应关系（不在返回结果中显示 class_id）。
+    返回每条记录包含：sign_task_id, initiator_name, created_at, updated_at(结束时间), sign_task_status, my_sign_status
+    """
+    if not req.student_id:
+        raise HTTPException(status_code=400, detail="需要提供 student_id")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT
+                st.sign_task_id,
+                COALESCE(ui.name, st.initiator) AS initiator_name,
+                st.created_at,
+                st.updated_at,
+                st.status AS sign_task_status,
+                sr.sign_status AS my_sign_status
+            FROM sign_record sr
+            JOIN sign_task st ON sr.sign_task_id = st.sign_task_id
+            JOIN student_class sc ON sc.student_id = sr.student_id AND sc.class_id = st.class_id
+            LEFT JOIN user_info ui ON st.initiator = ui.id
+            WHERE sr.student_id = %s
+            ORDER BY st.created_at DESC
+            """,
+            (req.student_id,)
+        )
+        rows = cursor.fetchall()
+
+        data = []
+        if rows:
+            for r in rows:
+                data.append({
+                    "sign_task_id": r[0],
+                    "initiator_name": r[1],
+                    "created_at": r[2].strftime("%Y-%m-%d %H:%M:%S") if r[2] else None,
+                    "updated_at": r[3].strftime("%Y-%m-%d %H:%M:%S") if r[3] else None,
+                    "sign_task_status": int(r[4]) if r[4] is not None else None,
+                    "my_sign_status": int(r[5]) if r[5] is not None else None
+                })
+
+        return {"code": 200, "data": data}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"查询学生签到历史失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
     finally:
         try:
