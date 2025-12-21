@@ -40,7 +40,6 @@ CREATE TABLE `sign_task` (
     ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   KEY `idx_class_id` (`class_id`),
-  UNIQUE KEY `uk_task_id` (`task_id`)
 ) ENGINE=InnoDB
 DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_0900_ai_ci
