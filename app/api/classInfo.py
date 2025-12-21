@@ -103,64 +103,29 @@ def create_class(req: ClassCreate):
             pass
 
 
-class OwnerQueryReq(BaseModel):
-    id: Optional[str] = None
 
-@router.post("/api/searchclass_by_user", response_model=dict, status_code=200)
-def get_classes_by_user(req: OwnerQueryReq):
+@router.get("/api/searchclass", response_model=dict, status_code=200)
+def get_all_classes():
     """
-    根据 user_info.id 查询该用户（id 对应的 user），返回该用户名下的班级信息
-    请求 Body 示例: {"id": "string"}
-    返回:
-    {
-      "code": 200,
-      "data": {
-        "owner_id": "string",
-        "owner_name": "string",
-        "classes": [
-          {"id": "string", "name": "string"}
-        ]
-      }
-    }
+    返回 class 表中所有班级的 id 和 name
+    无需请求体，直接调用
+    返回: {"code":200, "data": {"classes": [{"id":"...", "name":"..."}]}}
     """
-    if not req.id:
-        raise HTTPException(status_code=400, detail="需要提供 id")
-
     try:
         conn = get_connection()
         if not conn:
             raise HTTPException(status_code=500, detail="数据库连接失败")
 
         cursor = conn.cursor()
-        # 先查 user_info 获取 owner 名称
-        cursor.execute("SELECT id, name FROM user_info WHERE id = %s LIMIT 1", (req.id,))
-        user_row = cursor.fetchone()
-        if not user_row:
-            cursor.close()
-            conn.close()
-            return {"code": 404, "status": None}
-
-        owner_id, owner_name = user_row
-
-        # 查询 class 表中 owner 与 user.id 或 owner 与 user.name 匹配的班级
-        sql = "SELECT id, `name` FROM class WHERE owner = %s OR owner = %s"
-        cursor.execute(sql, (owner_id, owner_name))
+        cursor.execute("SELECT id, `name` FROM class")
         rows = cursor.fetchall()
-
         classes = [{"id": r[0], "name": r[1]} for r in rows] if rows else []
 
         cursor.close()
         conn.close()
 
-        return {
-            "code": 200,
-            "data": {
-                "owner_id": owner_id,
-                "owner_name": owner_name,
-                "classes": classes
-            }
-        }
+        return {"code": 200, "data": {"classes": classes}}
 
     except Exception as e:
-        logger.error(f"查询用户班级失败: {e}")
+        logger.error(f"查询所有班级失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")

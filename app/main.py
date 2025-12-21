@@ -5,7 +5,7 @@ from PIL import Image
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
-from .api import userInfo,signIn,classInfo
+from .api import userInfo,signIn,classInfo,signTask
 from fastapi.middleware.cors import CORSMiddleware
 from .middlewares.exception_handlers import (
     validation_exception_handler,
@@ -38,6 +38,7 @@ def main():
     app.include_router(userInfo.router)
     app.include_router(signIn.router)
     app.include_router(classInfo.router)
+    app.include_router(signTask.router)
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
