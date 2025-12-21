@@ -33,3 +33,7 @@ logs/
 
 .dockerignore
 
+# 人脸照片文件
+app/static/faces/*
+!app/static/faces/.gitkeep
+

@@ -11,6 +11,8 @@ async def validation_exception_handler(
     exc: RequestValidationError
 ):
     """处理请求参数验证异常"""
+    logger.error(f"参数验证失败: {exc.errors()}")
+    logger.error(f"请求体: {exc.body}")
     return JSONResponse(
         status_code=422,  # 改为实际的 HTTP 状态码
         content={
