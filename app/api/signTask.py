@@ -1,9 +1,9 @@
+import uuid
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List
 from app.db.connection import get_connection
-import logging
-import uuid
 
 logger = logging.getLogger()
 router = APIRouter()
@@ -12,6 +12,7 @@ router = APIRouter()
 class PublishSignReq(BaseModel):
     classlist: List[str]
     initiator: str
+
 
 @router.post("/api/publish_sign_task", response_model=dict, status_code=200)
 def publish_sign_task(req: PublishSignReq):
@@ -22,8 +23,12 @@ def publish_sign_task(req: PublishSignReq):
       "classlist": ["classid1", "classid2"],
       "initiator": "teacher_name"
     }
-    为本次发布生成一个统一的 task_id（12位），每个班级生成独立的 sign_task.id（12位）且写入相同的 task_id。
-    然后查询 student_class 表拿到该班级的所有 student_id，并将生成的 task_id 与 student_id 写入 sign_record 表。
+    
+    逻辑说明：
+    1. 为本次发布生成一个统一的 task_id（12位）
+    2. 为每个班级生成独立的 sign_task.id（12位）
+    3. 所有 sign_task 记录共享同一个 task_id
+    4. 查询每个班级的学生并创建 sign_record 记录
     """
     if not req.classlist or not req.initiator:
         raise HTTPException(status_code=400, detail="需要提供 classlist 和 initiator")
@@ -36,70 +41,115 @@ def publish_sign_task(req: PublishSignReq):
             raise HTTPException(status_code=500, detail="数据库连接失败")
 
         cursor = conn.cursor()
-        created = []
+        created_tasks = []
 
-        # 统一 task_id（12 位）
+        # 生成统一的 task_id（12位UUID）
         task_id = uuid.uuid4().hex[:12]
 
         for class_id in req.classlist:
-            # 为每个班级生成独立的 sign_task.id（12位），并写入共同的 task_id
+            # 验证班级是否存在
+            cursor.execute("SELECT id FROM class WHERE id = %s LIMIT 1", (class_id,))
+            if not cursor.fetchone():
+                logger.warning(f"班级不存在，跳过: {class_id}")
+                continue
+
+            # 为每个班级生成独立的 sign_task.id（12位）
             sign_task_id = None
-            for _ in range(5):
-                candidate = uuid.uuid4().hex[:12]
+            for attempt in range(5):
+                candidate_id = uuid.uuid4().hex[:12]
                 try:
                     cursor.execute(
-                        "INSERT INTO sign_task (id, task_id, class_id, initiator, status) VALUES (%s, %s, %s, %s, %s)",
-                        (candidate, task_id, class_id, req.initiator, 1)
+                        """
+                        INSERT INTO sign_task (id, task_id, class_id, initiator, status) 
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (candidate_id, task_id, class_id, req.initiator, 1)
                     )
                     conn.commit()
-                    sign_task_id = candidate
+                    sign_task_id = candidate_id
+                    logger.info(f"创建签到任务成功: id={candidate_id}, task_id={task_id}, class_id={class_id}")
                     break
                 except Exception as e:
                     conn.rollback()
-                    msg = str(e).lower()
-                    if "duplicate" in msg or "unique" in msg or "1062" in msg:
+                    error_msg = str(e).lower()
+                    # 检查是否为唯一键冲突
+                    if "duplicate" in error_msg or "unique" in error_msg or "1062" in error_msg:
+                        logger.warning(f"ID冲突，重试: attempt={attempt + 1}, error={e}")
                         continue
+                    # 其他错误直接抛出
+                    logger.error(f"插入 sign_task 失败: {e}")
                     raise HTTPException(status_code=500, detail=f"插入 sign_task 失败: {e}")
 
             if sign_task_id is None:
-                raise HTTPException(status_code=500, detail="生成 sign_task id 失败，请重试")
+                logger.error(f"生成 sign_task id 失败，班级: {class_id}")
+                raise HTTPException(status_code=500, detail=f"生成签到任务ID失败，班级: {class_id}")
 
-            # 查询该班级所有学生
-            cursor.execute("SELECT student_id FROM student_class WHERE class_id = %s", (class_id,))
-            rows = cursor.fetchall()
+            # 查询该班级的所有学生
+            cursor.execute(
+                "SELECT student_id FROM student_class WHERE class_id = %s", 
+                (class_id,)
+            )
+            students = cursor.fetchall()
 
-            # 将 task_id 与 student_id 存入 sign_record（每条记录生成独立 id）
-            if rows:
-                for r in rows:
-                    student_id = r[0]
-                    record_id = None
-                    for _ in range(5):
-                        rid = uuid.uuid4().hex[:12]
-                        try:
-                            # 存入统一的 task_id（而非单条 sign_task.id）
-                            cursor.execute(
-                                "INSERT INTO sign_record (id, sign_task_id, student_id) VALUES (%s, %s, %s)",
-                                (rid, sign_task_id, student_id)
-                            )
-                            conn.commit()
-                            record_id = rid
-                            break
-                        except Exception as e:
-                            conn.rollback()
-                            msg = str(e).lower()
-                            if "duplicate" in msg or "unique" in msg or "1062" in msg:
-                                break
-                            raise HTTPException(status_code=500, detail=f"插入 sign_record 失败: {e}")
+            if not students:
+                logger.warning(f"班级无学生，跳过创建记录: class_id={class_id}")
+                created_tasks.append({
+                    "class_id": class_id, 
+                    "sign_task_id": sign_task_id,
+                    "student_count": 0
+                })
+                continue
 
-            created.append({"class_id": class_id, "sign_task_id": sign_task_id})
+            # 批量插入 sign_record
+            success_count = 0
+            for student_row in students:
+                student_id = student_row[0]
+                
+                # 为每条记录生成独立的 id
+                for attempt in range(5):
+                    record_id = uuid.uuid4().hex[:12]
+                    try:
+                        cursor.execute(
+                            """
+                            INSERT INTO sign_record (id, sign_task_id, student_id, sign_status) 
+                            VALUES (%s, %s, %s, %s)
+                            """,
+                            (record_id, sign_task_id, student_id, 0)
+                        )
+                        conn.commit()
+                        success_count += 1
+                        break
+                    except Exception as e:
+                        conn.rollback()
+                        error_msg = str(e).lower()
+                        # 唯一键冲突（同一学生同一任务重复插入）
+                        if "duplicate" in error_msg or "unique" in error_msg or "1062" in error_msg:
+                            logger.warning(f"签到记录已存在: sign_task_id={sign_task_id}, student_id={student_id}")
+                            break  # 跳过该学生
+                        # 其他错误重试
+                        if attempt < 4:
+                            continue
+                        logger.error(f"插入 sign_record 失败: {e}")
+                        raise HTTPException(status_code=500, detail=f"插入 sign_record 失败: {e}")
 
-        logger.info(f"发布签到任务成功: initiator={req.initiator}, task_id={task_id}, tasks={created}")
-        return {"code": 200, "task_id": task_id, "tasks": created}
+            created_tasks.append({
+                "class_id": class_id,
+                "sign_task_id": sign_task_id,
+                "student_count": success_count
+            })
+
+        logger.info(f"发布签到任务成功: initiator={req.initiator}, task_id={task_id}, tasks={created_tasks}")
+        return {
+            "code": 200,
+            "message": "签到任务发布成功",
+            "task_id": task_id,
+            "tasks": created_tasks
+        }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"发布签到失败: {e}")
+        logger.error(f"发布签到任务失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
     finally:
         try:
@@ -107,8 +157,8 @@ def publish_sign_task(req: PublishSignReq):
                 cursor.close()
             if conn:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as close_error:
+            logger.error(f"关闭数据库连接失败: {close_error}")
 
 
 class StudentSignReq(BaseModel):

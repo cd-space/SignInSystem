@@ -108,4 +108,4 @@ app.include_router(signTask.router)
 
 logger.info("程序启动")
 
-uvicorn.run(app, host="0.0.0.0", port=8001)
+uvicorn.run(app, host="0.0.0.0", port=8000)

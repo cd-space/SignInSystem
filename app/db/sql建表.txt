@@ -63,7 +63,7 @@ COMMENT='签到记录表';
 
 
 CREATE TABLE `student_class` (
-  `id` CHAR(36) NOT NULL COMMENT '主键',
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键（自增）',
   `student_id` CHAR(36) NOT NULL COMMENT '学生ID',
   `class_id` CHAR(36) NOT NULL COMMENT '班级ID',
   `joined_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '加入班级时间',
