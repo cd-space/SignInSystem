@@ -2,7 +2,6 @@ from facenet_pytorch import MTCNN, InceptionResnetV1
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import matplotlib.pylab as plt
-import cv2
 import torch
 
 import logging

@@ -28,3 +28,6 @@ logs/
 # Environment variables
 .env
 .env.local
+
+*.tar
+
