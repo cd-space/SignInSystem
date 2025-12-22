@@ -3,18 +3,46 @@ from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 import matplotlib.pylab as plt
 import torch
-
 import logging
+from pathlib import Path
 
 logger = logging.getLogger()
 
 class FaceRecognitionService:
     def __init__(self):
-    # """初始化人脸检测器"""
-        self.mtcnn = MTCNN(keep_all=True, device='cpu')  # keep_all=True 检测所有人脸
-        logger.info("MTCNN 人脸检测器初始化成功")
-        self.resnet = InceptionResnetV1(pretrained='vggface2').eval()
-        logger.info("InceptionResnetV1 特征提取模型初始化成功")
+        """初始化人脸检测器和特征提取模型（从本地加载权重）"""
+        
+        # 模型权重文件路径
+        models_dir = Path("app/models")
+        vggface2_weights = models_dir / "20180402-114759-vggface2.pt"
+        # casia_weights = models_dir / "20180408-102900-casia-webface.pt"  # 备用
+        
+        try:
+            # 初始化 MTCNN 人脸检测器
+            self.mtcnn = MTCNN(keep_all=True, device='cpu')
+            logger.info("MTCNN 人脸检测器初始化成功")
+            
+            # 初始化 InceptionResnetV1 特征提取模型（不预训练）
+            self.resnet = InceptionResnetV1(pretrained=None).eval()
+            
+            # 从本地加载权重
+            if vggface2_weights.exists():
+                logger.info(f"从本地加载模型权重: {vggface2_weights}")
+                state_dict = torch.load(vggface2_weights, map_location='cpu')
+                
+                # ✅ 过滤掉不需要的 logits 层权重
+                state_dict_filtered = {k: v for k, v in state_dict.items() 
+                                      if not k.startswith('logits')}
+                
+                # 使用 strict=False 允许部分加载
+                self.resnet.load_state_dict(state_dict_filtered, strict=False)
+                logger.info("InceptionResnetV1 特征提取模型初始化成功（VGGFace2 权重）")
+            else:
+                raise FileNotFoundError(f"模型权重文件不存在: {vggface2_weights}")
+                
+        except Exception as e:
+            logger.error(f"模型初始化失败: {e}")
+            raise
 
 
     def detect_faces(self, image):
@@ -56,34 +84,34 @@ class FaceRecognitionService:
             return [], []
         
     def extract_features(self, faces):
-            """
-            从检测到的人脸中提取特征向量
+        """
+        从检测到的人脸中提取特征向量
+        
+        参数:
+            faces: torch.Tensor 格式的人脸图像 (N, 3, 160, 160)
             
-            参数:
-                faces: torch.Tensor 格式的人脸图像 (N, 3, 160, 160)
-                
-            返回:
-                features: 特征向量列表，每个特征向量形状为 (512,)
-            """
-            try:
-                if faces is None or len(faces) == 0:
-                    logger.warning("没有人脸可以提取特征")
-                    return []
-                
-                # 使用 FaceNet 提取特征
-                with torch.no_grad():
-                    embeddings = self.resnet(faces)
-                
-                logger.info(f"成功提取 {len(embeddings)} 个人脸特征，每个特征维度: {embeddings.shape[1]}")
-                
-                # 转换为 numpy 数组列表
-                features = [embedding.cpu().numpy() for embedding in embeddings]
-                
-                return features
-                
-            except Exception as e:
-                logger.error(f"特征提取失败: {e}")
+        返回:
+            features: 特征向量列表，每个特征向量形状为 (512,)
+        """
+        try:
+            if faces is None or len(faces) == 0:
+                logger.warning("没有人脸可以提取特征")
                 return []
+            
+            # 使用 FaceNet 提取特征
+            with torch.no_grad():
+                embeddings = self.resnet(faces)
+            
+            logger.info(f"成功提取 {len(embeddings)} 个人脸特征，每个特征维度: {embeddings.shape[1]}")
+            
+            # 转换为 numpy 数组列表
+            features = [embedding.cpu().numpy() for embedding in embeddings]
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"特征提取失败: {e}")
+            return []
     
     def detect_and_extract(self, image):
         """
