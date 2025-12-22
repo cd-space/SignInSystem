@@ -37,3 +37,9 @@ logs/
 app/static/faces/*
 !app/static/faces/.gitkeep
 
+
+
+# 模型权重文件
+app/models/*
+!app/models/.gitkeep
+!app/models/README.md
