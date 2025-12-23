@@ -7,9 +7,13 @@ from fastapi import APIRouter
 
 logger = logging.getLogger()
 router = APIRouter()
-    
-@router.delete("/api/deleteusers", response_model=dict, status_code=200)
-def delete_user(user_id: str):
+
+class DeleteUserReq(BaseModel):
+    user_id: str
+
+@router.post("/api/deleteusers", response_model=dict, status_code=200)
+def delete_user(req: DeleteUserReq):
+    user_id = req.user_id
     """
     删除用户接口
     请求参数:

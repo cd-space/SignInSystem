@@ -129,3 +129,61 @@ def get_all_classes():
     except Exception as e:
         logger.error(f"查询所有班级失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+
+
+class DeleteClassReq(BaseModel):
+    class_id: str
+
+
+@router.post("/api/deleteclass", response_model=dict, status_code=200)
+def delete_class(req: DeleteClassReq):
+    class_id = req.class_id
+    """
+    删除班级及其 student_class 映射
+    请求示例: /api/deleteclass?class_id=abcdef123456
+    返回: {"code":200}
+    """
+    if not class_id:
+        raise HTTPException(status_code=400, detail="需要提供 class_id")
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+        cursor = conn.cursor()
+
+        # 检查班级是否存在
+        cursor.execute("SELECT id FROM class WHERE id = %s LIMIT 1", (class_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="班级不存在")
+
+        # 删除 student_class 中的映射
+        cursor.execute("DELETE FROM student_class WHERE class_id = %s", (class_id,))
+
+        # 删除 class 表中的记录
+        cursor.execute("DELETE FROM class WHERE id = %s", (class_id,))
+
+        conn.commit()
+        logger.info(f"删除班级成功: ID={class_id}")
+        return {"code": 200}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        logger.error(f"删除班级失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except Exception:
+            pass
