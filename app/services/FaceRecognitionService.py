@@ -163,14 +163,14 @@ class FaceRecognitionService:
         
         return features, boxes
     
-    def compare_features(self, faces1, faces2, threshold=0.9):
+    def compare_features(self, faces1, faces2, threshold=0.7):
         """
         比对两组人脸特征向量（使用第一个人脸）
         
         参数:
             faces1: torch.Tensor, 第一张图片的人脸 tensor
             faces2: torch.Tensor, 第二张图片的人脸 tensor
-            threshold: float, 距离阈值，默认 0.9
+            threshold: float, 距离阈值，默认 0.7
             
         返回:
             is_match: bool, 是否匹配
