@@ -224,8 +224,6 @@ async def recognize_and_sign(
             return {"code": 200, "message": "没有未签到的学生", "matched": 0, "details": []}
 
         # 读取这些学生的人脸特征
-        format_ids = tuple(pending_student_ids)
-        # 构造查询 - 使用 IN
         cursor.execute(
             "SELECT id, face_feature FROM user_info WHERE id IN ({})".format(
                 ",".join(["%s"] * len(pending_student_ids))
@@ -263,7 +261,7 @@ async def recognize_and_sign(
 
         matched_student_set = set()
 
-        # 对每个检测到的人脸进行比对
+        # 对每个检测到的人脸进行比对并保存裁剪图（无论匹配与否都保存）
         for idx, feat in enumerate(features_list):
             box = boxes[idx] if idx < len(boxes) else None
             best_match = None
@@ -281,6 +279,8 @@ async def recognize_and_sign(
                     best_distance = dist
                     best_match = student_id
 
+            matched_flag = 0
+            matched_student_id = None
             if best_match is not None and best_distance is not None and best_distance <= threshold:
                 # 更新 sign_record 为已签到（1），并写入 face_score
                 cursor.execute(
@@ -289,43 +289,43 @@ async def recognize_and_sign(
                 )
                 conn.commit()
                 matched_student_set.add(best_match)
-
-                # 保存裁剪人脸图
-                try:
-                    if box is not None:
-                        x1, y1, x2, y2 = map(int, map(round, box))
-                        x1 = max(0, x1); y1 = max(0, y1)
-                        x2 = min(pil_image.width, x2); y2 = min(pil_image.height, y2)
-                        crop = pil_image.crop((x1, y1, x2, y2))
-                    else:
-                        crop = pil_image
-                    filename = f"{best_match}_{uuid.uuid4().hex[:8]}.jpg"
-                    save_path = save_base / filename
-                    crop.save(save_path, format="JPEG", quality=90)
-                    saved_paths.append(str(save_path))
-                except Exception as e:
-                    logger.error(f"保存裁剪图片失败: {e}")
-                    save_path = None
-
-                results.append({
-                    "student_id": best_match,
-                    "distance": best_distance,
-                    "saved_path": str(save_path) if save_path else None
-                })
+                matched_flag = 1
+                matched_student_id = best_match
                 logger.info(f"匹配成功: student_id={best_match}, distance={best_distance:.4f}")
             else:
-                # 未匹配到合适学生
-                results.append({
-                    "student_id": None,
-                    "distance": best_distance,
-                    "saved_path": None
-                })
                 logger.debug(f"未匹配的人脸 idx={idx}, best_distance={best_distance}")
+
+            # 保存裁剪人脸图（始终保存），文件名包含是否匹配标记 1/0 和学生 id 或 unknown
+            save_path = None
+            try:
+                if box is not None:
+                    x1, y1, x2, y2 = map(int, map(round, box))
+                    x1 = max(0, x1); y1 = max(0, y1)
+                    x2 = min(pil_image.width, x2); y2 = min(pil_image.height, y2)
+                    crop = pil_image.crop((x1, y1, x2, y2))
+                else:
+                    crop = pil_image
+
+                id_part = matched_student_id if matched_student_id else "unknown"
+                filename = f"{sign_task_id}_{idx}_{id_part}_{matched_flag}_{uuid.uuid4().hex[:8]}.jpg"
+                save_path = save_base / filename
+                crop.save(save_path, format="JPEG", quality=90)
+                saved_paths.append(str(save_path))
+            except Exception as e:
+                logger.error(f"保存裁剪图片失败: {e}")
+                save_path = None
+
+            results.append({
+                "student_id": matched_student_id,
+                "distance": best_distance,
+                "matched": matched_flag,
+                "saved_path": str(save_path) if save_path else None
+            })
 
         return {
             "code": 200,
             "message": "识别并签到完成",
-            "matched": len(results) and sum(1 for r in results if r["student_id"]),
+            "matched_count": len(matched_student_set),
             "details": results
         }
 
