@@ -86,7 +86,7 @@ def create_class(req: ClassCreate):
             conn.commit()
 
         logger.info(f"新增/复用班级成功: ID={class_id}, 数据={req.dict()}")
-        return {"code": 0, "id": class_id}
+        return {"code": 200, "id": class_id}
 
     except HTTPException:
         raise

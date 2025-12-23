@@ -261,3 +261,63 @@ def change_password(req: PasswordChangeReq):
     except Exception as e:
         logger.error(f"修改密码失败: {e}")
         raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
+    
+
+class RoleSearchReq(BaseModel):
+    role: str  # "all" / "teacher" / "student"
+
+@router.post("/api/search_by_role", response_model=dict, status_code=200)
+def search_by_role(req: RoleSearchReq):
+    """
+    根据 role 返回用户信息
+    role = "all" 返回所有用户
+    role = "teacher" 返回 role 字段为 teacher 的用户
+    role = "student" 返回 role 字段为 student 的用户
+    返回 data 包含 users 列表，每项含 id,name,phone,student_id,role,created_time,update_time
+    """
+    role = (req.role or "").lower()
+    if role not in ("all", "teacher", "student"):
+        raise HTTPException(status_code=400, detail="role 必须为 all/teacher/student")
+
+    try:
+        conn = get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="数据库连接失败")
+
+        cursor = conn.cursor()
+        # 增加 face_feature, face_path 两列用于判断是否采集过人脸数据
+        if role == "all":
+            sql = "SELECT id, name, phone, student_id, role, created_at, updated_at, face_feature, face_path FROM user_info"
+            params = ()
+        else:
+            sql = "SELECT id, name, phone, student_id, role, created_at, updated_at, face_feature, face_path FROM user_info WHERE role = %s"
+            params = (role,)
+
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+        users = []
+        if rows:
+            for r in rows:
+                # r indices: 0:id,1:name,2:phone,3:student_id,4:role,5:created_at,6:updated_at,7:face_feature,8:face_path
+                face_collected = bool(r[7]) and bool(r[8])
+                users.append({
+                    "id": r[0],
+                    "name": r[1],
+                    "phone": r[2],
+                    "student_id": r[3],
+                    "role": r[4],
+                    "created_time": r[5],
+                    "update_time": r[6],
+                    "face_collected": face_collected
+                })
+
+
+
+        cursor.close()
+        conn.close()
+
+        return {"code": 200, "data": {"users": users}}
+
+    except Exception as e:
+        logger.error(f"按 role 查询用户失败: {e}")
+        raise HTTPException(status_code=500, detail=f"服务器错误: {e}")
