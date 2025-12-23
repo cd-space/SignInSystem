@@ -184,7 +184,7 @@ async def upload_face(
 async def recognize_and_sign(
     sign_task_id: str = Form(..., description="签到任务ID"),
     photo: UploadFile = File(..., description="多人照片文件"),
-    threshold: float = Form(0.7, description="比对阈值，距离小于等于该值认为匹配（默认0.7）")
+    threshold: float = Form(0.8, description="比对阈值，距离小于等于该值认为匹配（默认0.8）")
 ):
     """
     上传多人照片，识别照片上的所有人，并对比指定签到任务中未签到的学生，
